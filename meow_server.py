@@ -2,8 +2,7 @@
 Meow Music helper server.
 
 - Serves this folder on http://localhost:8000
-- Redirects / (and any directory listing) straight to the player
-  (index.html or meow-music.html, whichever is in this folder)
+- Redirects / (and any directory listing) straight to meow-music.html
 - Adds /related?id=VIDEO_ID, which asks YouTube Music for that song's
   "radio" (up-next) queue via ytmusicapi. No account or key needed.
 
@@ -19,10 +18,9 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 PORT = 8000
+PAGE = "meow-music.html"
 HERE = os.path.dirname(os.path.abspath(__file__))
 os.chdir(HERE)
-# Works whether the player is named index.html (GitHub Pages) or meow-music.html
-PAGE = next((f for f in ("index.html", "meow-music.html") if os.path.exists(f)), "index.html")
 
 try:
     from ytmusicapi import YTMusic
@@ -75,7 +73,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         url = urlparse(self.path)
-        if url.path in ("", "/"):
+        if url.path in ("", "/", "/index.html"):
             return self.redirect()
         if url.path == "/related":
             return self.handle_related(url)

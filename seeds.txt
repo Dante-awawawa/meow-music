@@ -1,0 +1,7 @@
+# Extra starting points for the crawler. One per line: a YouTube video id or a search.
+# Charts are always used too. Add songs/artists your listeners will likely play.
+arijit singh
+the weeknd blinding lights
+taylor swift
+kendrick lamar
+lofi hip hop
