@@ -1822,7 +1822,17 @@ function playFrom(items,idx){      // plays items[idx]; the queue after it is th
   let pl=lists.find(l=>l.temp&&!l.hold);
   if(!pl){pl=newList("yt","Queue");pl.temp=true}
   pl.tracks=[{id:r.id,title:r.title||"YouTube video",artist:r.artist||"YouTube",album:"",dur:r.dur||0,bad:false}];pl.cur=-1;pl.seeded=new Set();
+  pl.fallback=[...items.slice(idx+1),...items.slice(0,idx)].filter(x=>x&&x.id&&ID11.test(x.id)).slice(0,25);      // used when no related-songs source answers
   activate(pl.id,true);select(0,true);
+}
+let relDB=null,relWhy="";
+function loadRelDB(){return relDB||(relDB=fetchJSON("related.json",{cache:"no-cache"},15000).catch(()=>null))}      // loaded once, only when needed
+async function staticRelated(id){
+  const db=await loadRelDB();
+  if(!db||!db.rel||!db.songs){relWhy="related.json couldn't be loaded from this site (is it uploaded and published?)";return null}
+  if(!db.rel[id]){relWhy="this song isn't in the crawled list yet ("+Object.keys(db.rel).length+" songs crawled so far)";return null}
+  const r=db.rel[id].map(x=>{const m=db.songs[x];return m&&m[0]?{id:x,title:m[0],artist:m[1],dur:m[2]}:null}).filter(Boolean);
+  return r.length?r:null;
 }
 async function fetchRelated(id){
   const pipedRel=async b=>{
@@ -1833,8 +1843,16 @@ async function fetchRelated(id){
     const j=await fetchJSON(`${b}/api/v1/videos/${id}?fields=recommendedVideos`);
     const r=(j.recommendedVideos||[]).filter(s=>s.videoId&&s.lengthSeconds>0).map(s=>({id:s.videoId,title:s.title,artist:topic(s.author),dur:s.lengthSeconds}));
     if(!r.length)throw new Error("empty");return r};
-  if(/^https?:$/.test(location.protocol)&&/^(localhost|127\.0\.0\.1)$/.test(location.hostname)){      // local helper (meow_server.py) first: YouTube Music's own radio queue
-    try{const r=await fetchJSON(`/related?id=${id}`,{},12000);if(Array.isArray(r)&&r.length)return r}catch{}
+  {      // 1) local helper (meow_server.py): live YouTube Music radio. On localhost always; on a hosted page only if you opted in with ?helper=1 (so visitors never get a "local network" prompt)
+    const here=/^(localhost|127\.0\.0\.1)$/.test(location.hostname)&&location.protocol!=="file:";
+    try{const q=new URLSearchParams(location.search).get("helper");if(q==="1")localStorage.setItem("meow.helper","1");else if(q==="0")localStorage.removeItem("meow.helper")}catch{}
+    let opted=false;try{opted=localStorage.getItem("meow.helper")==="1"}catch{}
+    if(here||opted){
+      try{const r=await fetchJSON(`${here?"":"http://localhost:8000"}/related?id=${id}`,{},12000);if(Array.isArray(r)&&r.length)return r}catch{}
+    }
+  }
+  {      // 2) related.json built by the GitHub Action: works for every visitor, no server
+    const r=await staticRelated(id);if(r)return r;
   }
   try{return await Promise.any([...[...custom(),...PIPED].map(b=>pipedRel(b)),...[...custom(),...INV].map(b=>invRel(b))])}catch{return null}
 }
@@ -1843,16 +1861,20 @@ async function extendQueue(pl,t){      // appends YouTube's related songs for t,
   if(!pl||!pl.temp||pl.hold||!t||qBusy||(pl.seeded&&pl.seeded.has(t.id)))return;
   qBusy=true;(pl.seeded||(pl.seeded=new Set())).add(t.id);
   try{
-    const r=await fetchRelated(t.id);
+    let r=await fetchRelated(t.id),usedFb=false;
     if(!lists.includes(pl))return;
     if(!r||!r.length){
       pl.seeded.delete(t.id);       // try again on the next song
-      if(pl.id===activeId)setStatus("Couldn't load YouTube's up-next list: no related-songs server answered. Only this song is queued. Add a working server under ⚙ keys & settings.");
-      return;
+      if(pl.fallback&&pl.fallback.length){      // no related-songs source answered: keep going with the rest of the list it was played from
+        r=pl.fallback;pl.fallback=null;usedFb=true;
+      }else{
+        if(pl.id===activeId)setStatus("Couldn't load YouTube's up-next list: "+(relWhy||"no related-songs source answered")+". Only this song is queued.");
+        return;
+      }
     }
     const have=new Set(pl.tracks.map(x=>x.id));let n=0;
     for(const x of r){if(have.has(x.id))continue;have.add(x.id);pl.tracks.push({id:x.id,title:x.title||"YouTube video",artist:x.artist||"YouTube",album:"",dur:x.dur||0,bad:false});if(++n>=20)break}
-    if(n&&pl.id===activeId){render();setStatus("")}
+    if(n&&pl.id===activeId){render();setStatus(usedFb?"No related songs: "+(relWhy||"no source answered")+". Queued the rest of the list instead.":"")}
   }finally{qBusy=false}
 }
 function closeMenu(){$("menu").hidden=true}
